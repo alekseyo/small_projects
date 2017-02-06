@@ -10,7 +10,7 @@ public class App
 {
     public static void main( String[] args )
     {
-    	MyCache myCache = new MyCache(100, 100_000_000);
+    	MyCache myCache = new MyCache(100, 100_000_000, 80_000_000);
         
     	
     

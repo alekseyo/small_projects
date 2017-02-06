@@ -8,7 +8,7 @@ public class MyCacheTest {
 
 	@Test
 	public void test() {
-		MyCache myCache = new MyCache(100, 100_000_000);
+		MyCache myCache = new MyCache(100, 100_000_000, 80_000_000);
 		
 		Random random = new Random();
 		for (int i = 0; i < 10000; i++) {
