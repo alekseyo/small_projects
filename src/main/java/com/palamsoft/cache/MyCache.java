@@ -23,7 +23,7 @@ import net.jcip.annotations.GuardedBy;
  * a reader synchronizes on node's monitor.
  * 
  * Memory usage is controlled by a daemon thread which stores least used entries on disk. Cache signals this
- * thread that memory limit is reached, the thread frees memory and signals back to the blocked cache methods.
+ * thread that memory limit is reached, the thread frees memory until lowMemoryLimit.
  * 
  */
 public class MyCache {
@@ -76,7 +76,6 @@ public class MyCache {
 		this(0, highLimitBytes, (int) ( highLimitBytes * 0.8 ) );
 	}
 
-
 	// BLOCKS-UNTIL: memoryAvailable
 	public int putToCache(byte[] data) {
 		int id = 0;
@@ -109,8 +108,6 @@ public class MyCache {
 	
 	// BLOCKS-UNTIL: memoryAvailable
 	public byte[] getFromCache(int id) {
-		byte[] result;
-
 		Node node;
 
 		rwl.readLock().lock();
@@ -123,7 +120,8 @@ public class MyCache {
 		} finally {
 			rwl.readLock().unlock();
 		}
-		
+
+		byte[] result;
 		synchronized (node) {
 			node.usedCount++;
 			if (node.value == null) {
