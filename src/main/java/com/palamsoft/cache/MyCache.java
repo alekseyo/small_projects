@@ -6,7 +6,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -44,14 +43,14 @@ public class MyCache {
 			this.size = value.length;
 		}
 	}
-
+	
 	@GuardedBy("this")
 	private final Map<String, byte[]> disk = new HashMap<String, byte[]>();
 
 	@GuardedBy("rwl")
 	private final List<Node> cache;
 	
-	@GuardedBy("rwl.writeLock")
+	@GuardedBy("rwl")
 	private long memorySize = 0; 
 
 	private final long highMemoryLimit;
@@ -63,9 +62,6 @@ public class MyCache {
 	
 	// CONDITION PREDICATE: noMemory (memorySize + loaded_node_size > highMemoryLimit)
 	private final Condition noMemory = rwl.writeLock().newCondition();
-	
-	// CONDITION PREDICATE: memoryAvailable (memory was freed)
-	private final Condition memoryAvailable = rwl.writeLock().newCondition();
 	
 	public MyCache(int initialCapacity, long highLimitBytes, long lowLimitBytes) {
 		this.cache = (initialCapacity == 0) ? new ArrayList<>() 
@@ -92,24 +88,14 @@ public class MyCache {
 		}
 
 		try {
-			Node node = new Node(Arrays.copyOf(data, data.length));
-
-			while (node.size + memorySize > highMemoryLimit) {
+			if (data.length + memorySize > highMemoryLimit) {
 				noMemory.signalAll();
-				logger.debug("Waiting: no room for new node");
-				
-				try {
-					if ( !memoryAvailable.await(1000, TimeUnit.MILLISECONDS) ) {
-						continue; // signal again
-					}
-				} catch (InterruptedException e) {
-					throw new RuntimeException("Interrupted");
-				}
+				throw new CacheUnavailableException("No room for new node. Please retry later");
 			}
+			Node node = new Node(Arrays.copyOf(data, data.length));
 			id = cache.size();
 			cache.add(node);
 			memorySize += node.size;
-
 		} finally {
 			rwl.writeLock().unlock();
 		}
@@ -139,30 +125,35 @@ public class MyCache {
 		}
 		
 		synchronized (node) {
+			node.usedCount++;
 			if (node.value == null) {
 				if (logger.isInfoEnabled()) {
 					logger.info("Read from disk node id: " + id);
 				}
 
+				byte[] loaded = loadFromFile(new Integer(id).toString());
 				rwl.writeLock().lock();
 				try {
-					while (node.size + memorySize > highMemoryLimit) {
-						noMemory.signalAll();
-						if (logger.isInfoEnabled()) {
-							logger.info("No room for node id: " + id + "; waiting");
+					if (node.size + memorySize > highMemoryLimit) {
+						if (logger.isDebugEnabled()) {
+							logger.debug("Not enough memory to load node id: " + id);
 						}
-						memoryAvailable.awaitUninterruptibly();
+						noMemory.signalAll();
+						return loaded;
 					}
-					node.value = loadFromFile(new Integer(id).toString());
-					memorySize += node.size;
+					else {
+						node.value = loaded; // should not escape
+						memorySize += node.size;
+					}
 				} finally {
 					rwl.writeLock().unlock();
 				}
 			}
-			node.usedCount++;
 			result = Arrays.copyOf(node.value, node.value.length);
 		}
-
+		if (logger.isInfoEnabled()) {
+			logger.info("Return value of node id: " + id);
+		}
 		return result;
 	}
 
@@ -246,8 +237,6 @@ public class MyCache {
 					if (logger.isDebugEnabled()) {
 						logger.debug("Memory used: " + memorySize);
 					}
-					memoryAvailable.signalAll();
-					
 				} finally {
 					rwl.writeLock().unlock();
 				}
@@ -274,6 +263,13 @@ public class MyCache {
 			}
 		}
 	}
+	
+	public static class CacheUnavailableException extends RuntimeException {
 
+		public CacheUnavailableException(String message) {
+			super(message);
+		}
+
+	}
 
 }
