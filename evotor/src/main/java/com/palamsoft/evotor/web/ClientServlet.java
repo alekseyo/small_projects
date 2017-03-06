@@ -69,7 +69,7 @@ public class ClientServlet extends HttpServlet {
 			return;
 		}
 
-		Processor processor;
+		RequestHandler handler;
 		try {
 			String requestType = ((Element) requestTypeNodes.item(0)).getTextContent();
 
@@ -78,10 +78,10 @@ public class ClientServlet extends HttpServlet {
 			}
 			switch (requestType) {
 			case "CREATE-ACT":
-				processor = new AddClientProcessor();
+				handler = new AddClientHandler();
 				break;
 			case "GET-BALANCE":
-				processor = new GetBalanceProcessor();
+				handler = new GetBalanceHandler();
 				break;
 			default:
 				logger.info("Invalid request type: " + requestType);
@@ -95,25 +95,33 @@ public class ClientServlet extends HttpServlet {
 		}
 
 		try {
-			Object response = processor.process(root);
+			Object response = handler.handle(root);
 			JAXBContext jc = JAXBContext.newInstance(response.getClass());
 			Marshaller marshaller = jc.createMarshaller();
 			marshaller.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, true);
 			marshaller.marshal(response, servletResponse.getOutputStream());
+			servletResponse.setStatus(HttpServletResponse.SC_OK);
 		} catch (Throwable t) {
 			logger.error("Failed to generate response", t);
 			servletResponse.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
 		}
 	}
 
-	private interface Processor {
-		Object process(Element root);
+	private interface RequestHandler {
+		
+		/**
+		 * Performs actual work to process request
+		 * 
+		 * @param root element of request XML document
+		 * @return response object
+		 */
+		Object handle(Element root);
 	}
 
-	private class AddClientProcessor implements Processor {
+	private class AddClientHandler implements RequestHandler {
 
 		@Override
-		public Object process(Element root) {
+		public Object handle(Element root) {
 			NodeList extras = root.getElementsByTagName("extra");
 
 			Client client = new Client();
@@ -151,10 +159,10 @@ public class ClientServlet extends HttpServlet {
 
 	}
 
-	private class GetBalanceProcessor implements Processor {
+	private class GetBalanceHandler implements RequestHandler {
 
 		@Override
-		public Object process(Element root) {
+		public Object handle(Element root) {
 			NodeList extras = root.getElementsByTagName("extra");
 			Client client = new Client();
 
